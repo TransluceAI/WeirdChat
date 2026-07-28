@@ -19,6 +19,22 @@ Usage:
     python phase1b_openrouter.py \
         --input data/perfectblend_train.jsonl --output-dir data \
         [--max-samples 3000] [--concurrency 16] [--heldout-frac 0.02]
+
+Any OpenAI-compatible endpoint works via --base-url / --api-key-env /
+--extra-body — but only if it serves the *exact* subject model: the baseline
+must be on-policy text from qwen3.6-35b-a3b itself, or the draft learns the
+wrong model's "normal" and the surprise scores measure the wrong thing.
+
+    # Groq (only if the exact model is in their catalog):
+    python phase1b_openrouter.py ... \
+        --base-url https://api.groq.com/openai/v1 --api-key-env GROQ_API_KEY \
+        --model <groq model id> --extra-body '{}'
+
+    # local SGLang serving the FP8 checkpoint:
+    python phase1b_openrouter.py ... \
+        --base-url http://127.0.0.1:30000/v1 --api-key-env NONE \
+        --model Qwen/Qwen3.6-35B-A3B-FP8 \
+        --extra-body '{"chat_template_kwargs": {"enable_thinking": false}}'
 """
 
 from __future__ import annotations
@@ -62,7 +78,7 @@ async def regen_row(client: AsyncOpenAI, args: Any, row: dict[str, Any]) -> dict
                 messages=messages,  # type: ignore[arg-type]
                 temperature=args.temperature,
                 max_tokens=args.max_tokens,
-                extra_body={"reasoning": {"enabled": False}},
+                extra_body=json.loads(args.extra_body),
             )
             reply = completion.choices[0].message.content or ""
             if not reply.strip():
@@ -93,9 +109,10 @@ async def run(args: Any) -> None:
     todo = rows[done:]
     print(f"{len(rows)} source rows, {done} already processed, {len(todo)} to go")
     if todo:
+        api_key = "EMPTY" if args.api_key_env == "NONE" else os.environ[args.api_key_env]
         client = AsyncOpenAI(
-            base_url=OPENROUTER_BASE_URL,
-            api_key=os.environ["OPENROUTER_API_KEY"],
+            base_url=args.base_url,
+            api_key=api_key,
             timeout=180.0,
             max_retries=3,
         )
@@ -150,6 +167,17 @@ def main() -> None:
     parser.add_argument("--input", required=True, help="perfectblend_train.jsonl")
     parser.add_argument("--output-dir", default="data")
     parser.add_argument("--model", default=SUBJECT_MODEL_SLUG)
+    parser.add_argument("--base-url", default=OPENROUTER_BASE_URL)
+    parser.add_argument(
+        "--api-key-env",
+        default="OPENROUTER_API_KEY",
+        help='env var holding the API key; "NONE" for keyless local endpoints',
+    )
+    parser.add_argument(
+        "--extra-body",
+        default='{"reasoning": {"enabled": false}}',
+        help="JSON merged into each request body (reasoning-off flag varies by provider)",
+    )
     parser.add_argument("--max-samples", type=int, default=3000)
     parser.add_argument("--concurrency", type=int, default=16)
     parser.add_argument("--temperature", type=float, default=WEIRDCHAT_TEMPERATURE)
