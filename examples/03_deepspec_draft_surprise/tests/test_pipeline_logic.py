@@ -200,9 +200,25 @@ def test_unwrap_text_config_nested_and_flat():
 def test_resolve_draft_intermediate_size_dense_moe_and_derived():
     dense = SimpleNamespace(intermediate_size=18944, hidden_size=4096)
     assert resolve_draft_intermediate_size(dense) == (18944, "intermediate_size")
-    # MoE: no dense intermediate_size, falls back to per-expert size.
-    moe = SimpleNamespace(intermediate_size=None, moe_intermediate_size=1536, hidden_size=4096)
-    assert resolve_draft_intermediate_size(moe) == (1536, "moe_intermediate_size")
+    # MoE with substantial active capacity (per-expert width x top-k) uses it.
+    moe = SimpleNamespace(
+        intermediate_size=None,
+        moe_intermediate_size=1536,
+        num_experts_per_tok=8,
+        hidden_size=4096,
+    )
+    assert resolve_draft_intermediate_size(moe) == (12288, "moe_active_capacity")
+    # Fine-grained experts (the qwen3.6-35b-a3b case: 512-wide) would make a
+    # crippled dense draft — fall back to the conventional 8/3·hidden width.
+    fine = SimpleNamespace(
+        intermediate_size=None,
+        moe_intermediate_size=512,
+        num_experts_per_tok=8,
+        hidden_size=4096,
+    )
+    size, source = resolve_draft_intermediate_size(fine)
+    assert source == "derived_from_hidden_size"
+    assert size % 128 == 0 and size >= 4096 * 8 // 3 - 128
     # Neither present: Qwen-style 8/3 * hidden, rounded to a multiple of 128.
     bare = SimpleNamespace(intermediate_size=None, moe_intermediate_size=None, hidden_size=3072)
     size, source = resolve_draft_intermediate_size(bare)

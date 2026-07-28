@@ -136,17 +136,24 @@ def resolve_draft_intermediate_size(config: Any) -> tuple[int, str]:
     """Pick a dense FFN width for the draft, returning (size, source).
 
     The DSpark draft is always dense, so it needs a scalar ``intermediate_size``.
-    Dense targets carry one; MoE targets (no ``intermediate_size``) fall back to
-    the per-expert ``moe_intermediate_size``, else a Qwen-style 8/3·hidden width.
+    Dense targets carry one. For MoE targets the per-expert
+    ``moe_intermediate_size`` alone can be tiny (fine-grained experts, e.g. 512
+    on qwen3.6-35b-a3b) — a draft that thin would be crippled. Use the *active*
+    capacity (per-expert width x experts per token) when it is at least the
+    conventional dense 8/3·hidden width, else fall back to that dense width.
     """
     dense = getattr(config, "intermediate_size", None)
     if dense is not None:
         return int(dense), "intermediate_size"
-    moe = getattr(config, "moe_intermediate_size", None)
-    if moe is not None:
-        return int(moe), "moe_intermediate_size"
     hidden = int(config.hidden_size)
-    return (round(hidden * 8 / 3 / 128) * 128), "derived_from_hidden_size"
+    derived = round(hidden * 8 / 3 / 128) * 128
+    moe = getattr(config, "moe_intermediate_size", None)
+    top_k = getattr(config, "num_experts_per_tok", None)
+    if moe is not None and top_k:
+        active = int(moe) * int(top_k)
+        if active >= derived:
+            return active, "moe_active_capacity"
+    return derived, "derived_from_hidden_size"
 
 
 def pick_mask_token(special_tokens: dict[str, int], reserved: set[str]) -> tuple[str, int]:

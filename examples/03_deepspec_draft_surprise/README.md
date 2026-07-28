@@ -70,11 +70,14 @@ parser produces a non-empty assistant loss mask. Whether the template emits
 `<think>` scaffolding is recorded but **not** fatal (it is empty and
 consistent across data; the loss-mask gate proves the data path works).
 
-Verified findings for `Qwen/Qwen3.6-35B-A3B` (first Colab run):
-`model_type=qwen3_5_moe`, architecture `Qwen3_5MoeForConditionalGeneration`
-with nested `text_config`, no dense `intermediate_size`, mask token
-`151669` absent, and a `<think>` scaffold the template emits even with
-`enable_thinking=False`. All four are handled by `deepspec_qwen36.patch` plus
+Verified findings for `Qwen/Qwen3.6-35B-A3B` (Colab runs; all hard gates now
+pass): `model_type=qwen3_5_moe`, architecture
+`Qwen3_5MoeForConditionalGeneration` with nested `text_config`, 40 layers
+(→ `target_layer_ids=[1, 10, 19, 28, 37]`), no dense `intermediate_size` and
+fine-grained 512-wide experts (so the draft FFN width is resolved from active
+capacity / the 8/3·hidden rule instead), mask token `151669` absent
+(→ `<|vision_pad|>`=248055), and a `<think>` scaffold the template emits even
+with `enable_thinking=False`. All are handled by `deepspec_qwen36.patch` plus
 the phase-0 recommendations. The report emits, for phases 2–3:
 `recommended_target_layer_ids` (→ `--opts model.target_layer_ids`),
 `recommended_draft_intermediate_size` (→ `WEIRDSPEC_DRAFT_INTERMEDIATE_SIZE`),
