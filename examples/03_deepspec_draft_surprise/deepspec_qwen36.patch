@@ -106,7 +106,7 @@ index d5b7c61..542d92c 100644
          target_lm_head = target_model.get_output_embeddings()
          assert (target_lm_head is not None) and (target_embed_tokens is not None)
 diff --git a/scripts/data/prepare_target_cache.py b/scripts/data/prepare_target_cache.py
-index cae8c0c..12ff673 100644
+index cae8c0c..a06139c 100644
 --- a/scripts/data/prepare_target_cache.py
 +++ b/scripts/data/prepare_target_cache.py
 @@ -52,6 +52,33 @@ class TargetForwardResult:
@@ -165,7 +165,7 @@ index cae8c0c..12ff673 100644
  
  
  def _get_hook_tensor(output):
-@@ -251,11 +283,25 @@ def main(local_rank: int):
+@@ -251,11 +283,32 @@ def main(local_rank: int):
      tokenizer = AutoTokenizer.from_pretrained(
          config.model.target_model_name_or_path,
      )
@@ -174,23 +174,30 @@ index cae8c0c..12ff673 100644
 -        dtype=torch.bfloat16,
 -        attn_implementation="sdpa",
 -    ).to(device=device).eval()
++    from transformers import AutoConfig
++
++    _target_auto_config = AutoConfig.from_pretrained(config.model.target_model_name_or_path)
++    _load_kwargs = {"attn_implementation": "sdpa"}
++    if getattr(_target_auto_config, "quantization_config", None) is not None:
++        # Quantized checkpoints (e.g. FP8) carry their own dtype plan; forcing
++        # bf16 would conflict with the quantizer's layout.
++        _load_kwargs["dtype"] = "auto"
++    else:
++        _load_kwargs["dtype"] = torch.bfloat16
 +    try:
 +        target_model = AutoModel.from_pretrained(
 +            config.model.target_model_name_or_path,
-+            dtype=torch.bfloat16,
-+            attn_implementation="sdpa",
++            **_load_kwargs,
 +        )
 +    except ValueError:
 +        # Architectures outside the AutoModel mapping (e.g. the qwen3.6 MoE
 +        # *ForConditionalGeneration wrapper) load via their concrete class.
 +        import transformers as _transformers
-+        from transformers import AutoConfig
 +
-+        _arch = str(AutoConfig.from_pretrained(config.model.target_model_name_or_path).architectures[0])
++        _arch = str(_target_auto_config.architectures[0])
 +        target_model = getattr(_transformers, _arch).from_pretrained(
 +            config.model.target_model_name_or_path,
-+            dtype=torch.bfloat16,
-+            attn_implementation="sdpa",
++            **_load_kwargs,
 +        )
 +    target_model = target_model.to(device=device).eval()
      target_hidden_size = _get_target_hidden_size(target_model)

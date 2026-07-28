@@ -241,7 +241,16 @@ def main() -> None:
     layer_ids = [int(i) for i in draft_model.target_layer_ids]
     print(f"draft loaded: block_size={block_size} target_layer_ids={layer_ids}")
 
-    target_kwargs: dict[str, Any] = {"dtype": torch.bfloat16, "attn_implementation": "sdpa"}
+    from transformers import AutoConfig
+
+    target_auto_config = AutoConfig.from_pretrained(args.target)
+    target_kwargs: dict[str, Any] = {"attn_implementation": "sdpa"}
+    # Quantized checkpoints (e.g. the FP8 repo the dataset was generated from)
+    # carry their own dtype plan — forcing bf16 would conflict with it.
+    if getattr(target_auto_config, "quantization_config", None) is not None:
+        target_kwargs["dtype"] = "auto"
+    else:
+        target_kwargs["dtype"] = torch.bfloat16
     if args.target_device_map:
         target_kwargs["device_map"] = args.target_device_map
     try:
@@ -250,9 +259,8 @@ def main() -> None:
         # Architectures outside the AutoModel mapping (e.g. the qwen3.6 MoE
         # *ForConditionalGeneration wrapper) load via their concrete class.
         import transformers as transformers_module
-        from transformers import AutoConfig
 
-        architecture = str(AutoConfig.from_pretrained(args.target).architectures[0])
+        architecture = str(target_auto_config.architectures[0])
         target_model = getattr(transformers_module, architecture).from_pretrained(
             args.target, **target_kwargs
         )

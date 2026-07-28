@@ -55,6 +55,11 @@ def main() -> None:
     parser.add_argument("--target", default=DEFAULT_TARGET_MODEL)
     parser.add_argument("--output", default="phase0_report.json")
     parser.add_argument("--deep", action="store_true")
+    parser.add_argument(
+        "--gpu",
+        action="store_true",
+        help="additionally check the local GPU (CUDA, flex-attention, FP8 handling)",
+    )
     args = parser.parse_args()
 
     resolve_deepspec_root(args.deepspec_root)
@@ -283,6 +288,52 @@ def main() -> None:
             return {"draft_params": n_params}
 
         ok &= gate(report, "G6_meta_instantiation", True, g6)
+
+    # G7 (--gpu): the local accelerator can run phases 2-4. Checks CUDA, the
+    # flex-attention kernel the draft uses, memory headroom for the target's
+    # weights, and how a quantized (e.g. FP8) checkpoint will be handled.
+    if args.gpu:
+
+        def g7() -> dict[str, Any]:
+            import torch
+            from torch.nn.attention.flex_attention import create_block_mask  # noqa: F401
+
+            assert torch.cuda.is_available(), "no CUDA device visible"
+            properties = torch.cuda.get_device_properties(0)
+            capability = torch.cuda.get_device_capability(0)
+            total_gb = properties.total_memory / 1024**3
+            quant = getattr(state["config"], "quantization_config", None)
+            if quant is None:
+                quant = getattr(state.get("effective_config"), "quantization_config", None)
+            quant_method = None
+            if quant is not None:
+                quant_method = (
+                    quant.get("quant_method")
+                    if isinstance(quant, dict)
+                    else getattr(quant, "quant_method", None)
+                )
+            detail: dict[str, Any] = {
+                "device": properties.name,
+                "capability": f"sm{capability[0]}{capability[1]}",
+                "vram_gb": round(total_gb, 1),
+                "quantization": quant_method or "none (full-precision checkpoint)",
+            }
+            if quant_method is None and total_gb < 75:
+                detail["warning"] = (
+                    "full-precision 35B weights (~70 GB) exceed this GPU; use the "
+                    "FP8 checkpoint (WEIRDSPEC_TARGET_MODEL=Qwen/Qwen3.6-35B-A3B-FP8)"
+                )
+            if quant_method is not None and capability[0] < 9:
+                # Pre-Hopper GPUs (A100 = sm80) lack native FP8 compute;
+                # transformers must run the checkpoint weight-only-dequantized.
+                detail["fp8_note"] = (
+                    "no native FP8 compute on this GPU — transformers will "
+                    "dequantize weights on the fly (slower, works)"
+                )
+            report["gpu"] = detail
+            return detail
+
+        ok &= gate(report, "G7_gpu", True, g7)
 
     report["all_hard_gates_passed"] = ok
     with open(args.output, "w", encoding="utf-8") as f:

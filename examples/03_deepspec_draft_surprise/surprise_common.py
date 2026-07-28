@@ -14,6 +14,7 @@ are injected from here, which DeepSpec's ``config_path`` mechanism supports.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -218,6 +219,34 @@ def write_jsonl(path: str, rows: list[dict[str, Any]]) -> None:
     with open(path, "w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def is_heldout_line(line: str, frac: float) -> bool:
+    """Deterministic content-hash split (same rule as phase1_baseline.sh)."""
+    digest = hashlib.sha256(line.encode()).digest()
+    return digest[0] / 255.0 < frac
+
+
+def prepare_regen_conversations(conversations: Any) -> list[dict[str, str]] | None:
+    """Validate a source row for WeirdChat-protocol regeneration.
+
+    Returns the user turns (assistant turns dropped — they get regenerated),
+    or None if the row cannot be used under the protocol: rows with system
+    turns are rejected entirely (WeirdChat sampled without a system prompt),
+    as are rows not starting with a user turn.
+    """
+    if not isinstance(conversations, list) or not conversations:
+        return None
+    if any(m.get("role") == "system" for m in conversations):
+        return None
+    if conversations[0].get("role") != "user":
+        return None
+    user_turns = [
+        {"role": "user", "content": str(m.get("content", ""))}
+        for m in conversations
+        if m.get("role") == "user"
+    ]
+    return user_turns or None
 
 
 def read_jsonl(path: str) -> list[dict[str, Any]]:

@@ -27,6 +27,18 @@ correlate with the unexpectedness Elo?".
 CPU phases (0 and 1a) directly in Google Colab, reading `HF_TOKEN` from Colab
 Secrets.
 
+**Single-GPU variant:** [`gpu_colab.ipynb`](gpu_colab.ipynb) runs phases 1b–5
+on one Colab A100. It fits by (a) regenerating the baseline via **OpenRouter**
+([`phase1b_openrouter.py`](phase1b_openrouter.py) — no local serving), (b)
+using the **FP8 checkpoint** (~35 GB, the exact checkpoint the dataset was
+generated from) for the forward-only cache/scoring passes, and (c) capping the
+corpus ([`dspark_qwen36_35b_a3b_colab.py`](dspark_qwen36_35b_a3b_colab.py):
+max_length 2048, global batch 128, frequent checkpoints). Phase 0's `--gpu`
+gate verifies CUDA/flex-attention/FP8 handling before any GPU hours are spent.
+Trade-offs: a weaker draft than a full multi-GPU run, and baseline texts come
+from OpenRouter's provider quantization while hidden states come from FP8 —
+the same replication gap WeirdChat documents.
+
 ## Prerequisites
 
 - A DeepSpec checkout (`DEEPSPEC_ROOT`) with its `requirements.txt` installed.

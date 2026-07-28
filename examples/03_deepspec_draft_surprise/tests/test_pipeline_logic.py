@@ -18,8 +18,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from surprise_common import (  # noqa: E402
     detect_assistant_prefix,
+    is_heldout_line,
     messages_to_conversations,
     pick_mask_token,
+    prepare_regen_conversations,
     recommend_target_layer_ids,
     resolve_draft_intermediate_size,
     spearman,
@@ -250,6 +252,35 @@ def test_detect_assistant_prefix_extracts_scaffold():
     assert detect_assistant_prefix(tok) == "<think>\n\n</think>\n\n"
     # No scaffold -> empty prefix.
     assert detect_assistant_prefix(_FakeTokenizer("")) == ""
+
+
+def test_is_heldout_line_deterministic_split():
+    lines = [f'{{"conversations": [{{"role": "user", "content": "q{i}"}}]}}' for i in range(400)]
+    first = [is_heldout_line(line, 0.05) for line in lines]
+    assert first == [is_heldout_line(line, 0.05) for line in lines]  # deterministic
+    frac = sum(first) / len(first)
+    assert 0.0 < frac < 0.15  # roughly the requested 5%
+    assert not any(is_heldout_line(line, 0.0) for line in lines)
+    assert all(is_heldout_line(line, 1.01) for line in lines)
+
+
+def test_prepare_regen_conversations_protocol_rules():
+    ok = prepare_regen_conversations(
+        [
+            {"role": "user", "content": "a"},
+            {"role": "assistant", "content": "b"},
+            {"role": "user", "content": "c"},
+        ]
+    )
+    # Assistant turns are dropped (they get regenerated), user turns kept in order.
+    assert ok == [{"role": "user", "content": "a"}, {"role": "user", "content": "c"}]
+    # System turns violate the WeirdChat protocol -> row rejected entirely.
+    assert prepare_regen_conversations(
+        [{"role": "system", "content": "s"}, {"role": "user", "content": "a"}]
+    ) is None
+    assert prepare_regen_conversations([{"role": "assistant", "content": "x"}]) is None
+    assert prepare_regen_conversations([]) is None
+    assert prepare_regen_conversations("nope") is None
 
 
 def test_pick_mask_token_prefers_pad_like_and_skips_reserved():
