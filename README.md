@@ -19,3 +19,10 @@ We query from subject models in OpenRouter for simplicity, but we note that many
 
 To get started, check out [`examples/01_quickstart`](examples/01_quickstart).
 
+## Changelog
+
+Dataset versions are tagged on the [Hugging Face repo](https://huggingface.co/datasets/Transluce/WeirdChat).
+
+- **v1.0.1** (2026-08-12): Removed 27 patterns (66 prompts, 4,224 transcripts) that an automated review flagged as likely false positives. Updated dataset has 1,361 patterns and 173,184 transcripts.
+- **v1.0.0** (2026-07-21): Initial release of the dataset with 1,388 patterns, 177,408 transcripts, across 6 models and 21 behaviors.
+
